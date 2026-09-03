@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta, timezone
 import json
 
 from workers import WorkerEntrypoint, Response
@@ -19,19 +18,27 @@ async def telegram_call(token, method, data):
         url,
         js_options({
             "method": "POST",
-            "headers": {"Content-Type": "application/json"},
+            "headers": {
+                "Content-Type": "application/json",
+            },
             "body": body,
         }),
     )
+
     return await response.json()
 
 
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
-        # Telegram webhook endpoint
         if request.method == "POST":
-            secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-            expected = getattr(self.env, "WEBHOOK_SECRET", "")
+            secret = request.headers.get(
+                "X-Telegram-Bot-Api-Secret-Token"
+            )
+            expected = getattr(
+                self.env,
+                "WEBHOOK_SECRET",
+                ""
+            )
 
             if expected and secret != expected:
                 return Response("Unauthorized", status=401)
@@ -41,16 +48,20 @@ class Default(WorkerEntrypoint):
             except Exception:
                 return Response("Bad Request", status=400)
 
-            message = update.get("message", {})
-            chat = message.get("chat", {})
-            text = message.get("text", "")
+            message = update.get("message") or {}
+            chat = message.get("chat") or {}
+            text = message.get("text") or ""
 
-            if not chat.get("id"):
+            chat_id = chat.get("id")
+
+            if not chat_id:
                 return Response("OK")
 
             if text == "/start":
-                cairo = ZoneInfo("Africa/Cairo")
-                now = datetime.now(timezone.utc).astimezone(cairo)
+                # Egypt time: UTC+3 during daylight saving time
+                egypt_tz = timezone(timedelta(hours=3))
+                now = datetime.now(timezone.utc).astimezone(egypt_tz)
+
                 current_time = now.strftime("%H:%M:%S")
                 current_date = now.strftime("%Y-%m-%d")
 
@@ -62,14 +73,20 @@ class Default(WorkerEntrypoint):
                     "👨‍💻 المطور: @MSR_Cracker"
                 )
 
-                await telegram_call(
+                result = await telegram_call(
                     self.env.BOT_TOKEN,
                     "sendMessage",
                     {
-                        "chat_id": chat["id"],
+                        "chat_id": chat_id,
                         "text": reply,
                     },
                 )
+
+                if not result.get("ok"):
+                    return Response(
+                        "Telegram API Error",
+                        status=500
+                    )
 
             return Response("OK")
 
